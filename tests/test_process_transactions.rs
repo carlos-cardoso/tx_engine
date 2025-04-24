@@ -1,14 +1,8 @@
-use std::{
-    collections::HashMap,
-    io::{Stdout, Write},
-    path::Path,
-    process::Output,
-};
+use std::path::Path;
 
-use rust_decimal::{Decimal, dec};
-use serde::Serialize;
+use rust_decimal::dec;
 use tx_engine::{
-    csv_input::read_transactions_from_csv,
+    csv_input::{read_transactions_from_csv, transactions_from_reader},
     model::{Account, ClientId, Clients},
 };
 
@@ -29,15 +23,83 @@ fn deposits_withdrawals() {
 
 #[test]
 fn dispute() {
-    let transactions_iter = read_transactions_from_csv(Path::new("data/input_example_dispute.csv"))
-        .expect("failed to load the csv");
+    let input_reader = r#"
+        type, client, tx, amount
+        deposit, 1, 1, 1.0
+        deposit, 2, 2, 2.0
+        deposit, 1, 3, 2.0
+        withdrawal, 1, 4, 1.5
+        withdrawal, 2, 5, 3.0
+        dispute, 2, 5, 
+        dispute, 1, 1,"#
+        .as_bytes();
+    let csv_reader = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All) //trim whitespace around fields
+        .from_reader(input_reader);
+    let transactions_iter = transactions_from_reader(csv_reader);
     let mut clients = Clients::default();
     clients
         .load_transactions(transactions_iter)
         .expect("invalid transactions");
 
-    let expected_client_1 = Account::new(dec!(1.0), dec!(0.5), false);
-    let expected_client_2 = Account::new(dec!(1.0), dec!(1.0), false);
+    let expected_client_1 = Account::new(dec!(0.5), dec!(1.0), false);
+    let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
+    assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
+    assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
+}
+
+#[test]
+fn resolve() {
+    let input_reader = r#"
+        type, client, tx, amount
+        deposit, 1, 1, 1.0
+        deposit, 2, 2, 2.0
+        deposit, 1, 3, 2.0
+        withdrawal, 1, 4, 1.5
+        withdrawal, 2, 5, 3.0
+        dispute, 2, 5,
+        dispute, 1, 1,
+        resolve, 1, 1,"#
+        .as_bytes();
+    let csv_reader = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All) //trim whitespace around fields
+        .from_reader(input_reader);
+    let transactions_iter = transactions_from_reader(csv_reader);
+    let mut clients = Clients::default();
+    clients
+        .load_transactions(transactions_iter)
+        .expect("invalid transactions");
+
+    let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
+    let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
+    assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
+    assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
+}
+
+#[test]
+fn chargeback() {
+    let input_reader = r#"
+        type, client, tx, amount
+        deposit, 1, 1, 1.0
+        deposit, 2, 2, 2.0
+        deposit, 1, 3, 2.0
+        withdrawal, 1, 4, 1.5
+        withdrawal, 2, 5, 3.0
+        dispute, 2, 5,
+        dispute, 1, 1,
+        chargeback, 1, 1,"#
+        .as_bytes();
+    let csv_reader = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All) //trim whitespace around fields
+        .from_reader(input_reader);
+    let transactions_iter = transactions_from_reader(csv_reader);
+    let mut clients = Clients::default();
+    clients
+        .load_transactions(transactions_iter)
+        .expect("invalid transactions");
+
+    let expected_client_1 = Account::new(dec!(0.5), dec!(0.0), true);
+    let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
     assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
     assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
 }
@@ -74,7 +136,9 @@ fn output() {
 
     // create a Vec to write to (instead of stdout)
     let mut out: Vec<u8> = Vec::new();
-    clients.write(&mut out);
+    clients
+        .write(&mut out)
+        .expect("failed to write csv to output");
 
     // sort the lines (Since the order of the csv lines is non-deterministic since we use a HashMap internally)
     let output_string = String::from_utf8(out).expect("invalid utf8");

@@ -24,10 +24,7 @@ fn malformed_transaction() {
         .trim(csv::Trim::All) //trim whitespace around fields
         .from_reader(input_reader);
     let mut transactions_iter = transactions_from_reader(csv_reader);
-    assert!(transactions_iter.any(|t| t.is_err_and(|e| match e {
-        ConversionError::CsvError(_) => true,
-        _ => false,
-    })));
+    assert!(transactions_iter.any(|t| t.is_err_and(|e| matches!(e, ConversionError::CsvError(_)))));
 }
 
 #[test]
@@ -44,10 +41,10 @@ fn invalid_transaction_type() {
         .trim(csv::Trim::All) //trim whitespace around fields
         .from_reader(input_reader);
     let mut transactions_iter = transactions_from_reader(csv_reader);
-    assert!(transactions_iter.any(|t| t.is_err_and(|e| match e {
-        ConversionError::InvalidTransactionType(_) => true,
-        _ => false,
-    })));
+    assert!(
+        transactions_iter
+            .any(|t| t.is_err_and(|e| matches!(e, ConversionError::InvalidTransactionType(_))))
+    );
 }
 
 #[test]
@@ -64,10 +61,9 @@ fn missing_amount() {
         .trim(csv::Trim::All) //trim whitespace around fields
         .from_reader(input_reader);
     let mut transactions_iter = transactions_from_reader(csv_reader);
-    assert!(transactions_iter.any(|t| t.is_err_and(|e| match e {
-        ConversionError::MissingAmount(_) => true,
-        _ => false,
-    })));
+    assert!(
+        transactions_iter.any(|t| t.is_err_and(|e| matches!(e, ConversionError::MissingAmount(_))))
+    );
 }
 
 #[test]
@@ -85,10 +81,7 @@ fn invalid_client_id() {
         .from_reader(input_reader);
 
     let mut transactions_iter = transactions_from_reader(csv_reader);
-    assert!(transactions_iter.any(|t| t.is_err_and(|e| match e {
-        ConversionError::CsvError(_) => true,
-        _ => false,
-    })));
+    assert!(transactions_iter.any(|t| t.is_err_and(|e| matches!(e, ConversionError::CsvError(_)))));
 }
 
 #[test]
@@ -106,8 +99,8 @@ fn invalid_decimal() {
         .from_reader(input_reader);
 
     let mut transactions_iter = transactions_from_reader(csv_reader);
-    assert!(transactions_iter.any(|t| t.is_err_and(|e| match e {
-        ConversionError::NegativeAmount(_) => true,
-        _ => false,
-    })));
+    assert!(
+        transactions_iter
+            .any(|t| t.is_err_and(|e| matches!(e, ConversionError::NegativeAmount(_))))
+    );
 }

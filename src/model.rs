@@ -1,14 +1,16 @@
 use std::{collections::HashMap, io};
 
 use rust_decimal::{Decimal, dec};
-use serde::{Deserialize, Serialize, de::value};
+use serde::{Deserialize, Serialize};
 
 use crate::csv_input::ConversionError;
 
+/// Clients contains the mapping between the ClientId's and the Client Accounts
 #[derive(Debug, Default)]
 pub struct Clients(pub HashMap<ClientId, AccountWithTransactions>);
 
 impl Clients {
+    /// Mutate the client Accounts with an iterator over Transactions
     pub fn load_transactions<T: Iterator<Item = Result<Transaction, ConversionError>>>(
         &mut self,
         transactions: T,
@@ -28,6 +30,7 @@ impl Clients {
         Ok(())
     }
 
+    /// Write the output csv to a Writer (e.g. to stdout)
     pub fn write<W: io::Write>(&self, wtr: W) -> io::Result<()> {
         let mut csv_writer = csv::WriterBuilder::new().from_writer(wtr);
 
@@ -40,10 +43,18 @@ impl Clients {
     }
 }
 
+/// Type that contains information about disputable transactions and the account data
 #[derive(Debug, Default)]
 pub struct AccountWithTransactions {
-    disputable_transactions: HashMap<TransactionId, Decimal>,
+    disputable_transactions: HashMap<TransactionId, TransactionStatus>,
     account: Account,
+}
+
+#[derive(Debug)]
+enum TransactionStatus {
+    NotDisputedAmount(Decimal),
+    DisputedAmount(Decimal),
+    ChargedBack, //cannot be chargedback or disputed again
 }
 
 impl AccountWithTransactions {
@@ -54,25 +65,50 @@ impl AccountWithTransactions {
                 tx,
                 amount,
             } => {
-                self.account.available = self.account.available + amount;
+                self.account.available += amount;
+                self.disputable_transactions.insert(
+                    tx.to_owned(),
+                    TransactionStatus::NotDisputedAmount(amount.to_owned()),
+                );
             }
             Transaction::Withdrawal {
                 client: _,
-                tx,
+                tx: _,
                 amount,
             } => {
                 if self.account.available >= *amount {
-                    self.account.available = self.account.available - amount;
+                    self.account.available -= amount;
                 }
             }
             Transaction::Dispute { client: _, tx } => {
-                todo!()
+                if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
+                    if let TransactionStatus::NotDisputedAmount(amount) = disputable_transaction {
+                        assert!(amount.is_sign_positive());
+                        self.account.held += *amount;
+                        self.account.available -= *amount;
+                        *disputable_transaction = TransactionStatus::DisputedAmount(*amount);
+                    }
+                }
             }
             Transaction::Resolve { client: _, tx } => {
-                todo!()
+                if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
+                    if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
+                        assert!(amount.is_sign_positive());
+                        self.account.held -= *amount;
+                        self.account.available += *amount;
+                        *disputable_transaction = TransactionStatus::NotDisputedAmount(*amount)
+                    }
+                }
             }
             Transaction::Chargeback { client: _, tx } => {
-                todo!()
+                if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
+                    if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
+                        assert!(amount.is_sign_positive());
+                        self.account.held -= *amount;
+                        *disputable_transaction = TransactionStatus::ChargedBack;
+                    }
+                    self.account.locked = true;
+                }
             }
         }
     }
@@ -152,7 +188,7 @@ impl Account {
 #[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone, Serialize)]
 pub struct ClientId(pub u16);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub struct TransactionId(u32);
 
 #[derive(Debug)]

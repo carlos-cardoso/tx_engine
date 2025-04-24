@@ -1,6 +1,6 @@
 use csv::Reader;
 use model::{InputCsvRecord, Transaction};
-use std::{fs::File, path::Path};
+use std::path::Path;
 use thiserror::Error;
 
 use crate::model;
