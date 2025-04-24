@@ -1,15 +1,17 @@
 use std::path::Path;
 use tx_engine::csv_input::{ConversionError, read_transactions_from_csv, transactions_from_reader};
 
+/// loads the sample csv
 #[test]
-fn test_load_valid_csv() {
+fn load_valid_csv() {
     let mut transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
     assert!(transactions_iter.all(|t| t.is_ok()));
 }
 
+/// the following tests use a in memory mocked csv to test validations of the transactions
 #[test]
-fn test_malformed_transaction() {
+fn malformed_transaction() {
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -29,7 +31,7 @@ fn test_malformed_transaction() {
 }
 
 #[test]
-fn test_invalid_transaction_type() {
+fn invalid_transaction_type() {
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -49,7 +51,7 @@ fn test_invalid_transaction_type() {
 }
 
 #[test]
-fn test_missing_amount() {
+fn missing_amount() {
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -69,7 +71,7 @@ fn test_missing_amount() {
 }
 
 #[test]
-fn test_invalid_client_id() {
+fn invalid_client_id() {
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -90,7 +92,7 @@ fn test_invalid_client_id() {
 }
 
 #[test]
-fn test_invalid_decimal() {
+fn invalid_decimal() {
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount

@@ -1,32 +1,18 @@
-use std::{collections::HashMap, env, path::Path};
+use std::{env, io, path::Path};
+use tx_engine::{csv_input::read_transactions_from_csv, model::Clients};
 
-use tx_engine::{
-    csv_input::read_transactions_from_csv,
-    model::{Account, ClientId},
-};
-
-fn main() {
+fn main() -> io::Result<()> {
     let mut args = env::args();
 
     let file_path = args.nth(1).expect("No command line argument was provided");
     let file_path = Path::new(&file_path);
     let transactions_iter = read_transactions_from_csv(file_path).expect("failed to load the csv");
 
-    let mut clients: HashMap<ClientId, Account> = HashMap::new();
+    let mut clients = Clients::default();
+    clients
+        .load_transactions(transactions_iter)
+        .expect("There are malformed transactions");
 
-    for t in transactions_iter {
-        println!("{:?}", t);
-        let transaction = t.expect("invalid transaction");
-
-        let client_id = transaction.client_id();
-        clients
-            .entry(client_id)
-            .and_modify(|account| account.apply(&transaction))
-            .or_insert_with(|| {
-                let mut account = Account::new();
-                account.apply(&transaction);
-                account
-            });
-    }
-    println!("{:?}", clients);
+    let stdout_handle = io::stdout();
+    clients.write(stdout_handle)
 }

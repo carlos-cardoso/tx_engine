@@ -1,35 +1,52 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io};
 
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use rust_decimal::{Decimal, dec};
+use serde::{Deserialize, Serialize, de::value};
 
 use crate::csv_input::ConversionError;
 
-#[derive(Debug)]
-pub struct Account {
-    disputable_transactions: HashMap<TransactionId, Decimal>,
-    available: Decimal, // The total funds that are available for trading, staking, withdrawal, etc. This should be equal to the total - held amount
-    held: Decimal, // The total funds that are held for dispute. This should be equal to total - available amounts
-    total: Decimal, // The total funds that are available or held. This should be equal to available + held
-    locked: bool,   // Whether the account is locked. An account is locked if a charge back occurs
+#[derive(Debug, Default)]
+pub struct Clients(pub HashMap<ClientId, AccountWithTransactions>);
+
+impl Clients {
+    pub fn load_transactions<T: Iterator<Item = Result<Transaction, ConversionError>>>(
+        &mut self,
+        transactions: T,
+    ) -> Result<(), ConversionError> {
+        for transaction in transactions {
+            let transaction = transaction?; // early returns if there is a malformed transaction
+            let client_id = transaction.client_id();
+            self.0
+                .entry(client_id)
+                .and_modify(|account| account.apply(&transaction))
+                .or_insert_with(|| {
+                    let mut account = AccountWithTransactions::default();
+                    account.apply(&transaction);
+                    account
+                });
+        }
+        Ok(())
+    }
+
+    pub fn write<W: io::Write>(&self, wtr: W) -> io::Result<()> {
+        let mut csv_writer = csv::WriterBuilder::new().from_writer(wtr);
+
+        for (client, account) in self.0.iter() {
+            csv_writer.serialize(CsvOutputAccount::from((client, account)))?;
+        }
+
+        csv_writer.flush()?;
+        Ok(())
+    }
 }
 
-impl Account {
-    pub fn new() -> Self {
-        Account {
-            disputable_transactions: HashMap::new(),
-            total: Decimal::new(0, 4),
-            held: Decimal::new(0, 4),
-            available: Decimal::new(0, 4),
-            locked: false,
-        }
-    }
+#[derive(Debug, Default)]
+pub struct AccountWithTransactions {
+    disputable_transactions: HashMap<TransactionId, Decimal>,
+    account: Account,
+}
 
-    fn update_total(&mut self) {
-        self.total = self.held + self.available;
-    }
-
-    // pub fn apply<T: Iterator<Item = Transaction>>(&mut self, transactions: T) {
+impl AccountWithTransactions {
     pub fn apply(&mut self, transaction: &Transaction) {
         match transaction {
             Transaction::Deposit {
@@ -37,18 +54,16 @@ impl Account {
                 tx,
                 amount,
             } => {
-                self.available = self.available + amount;
-                self.update_total();
+                self.account.available = self.account.available + amount;
             }
             Transaction::Withdrawal {
                 client: _,
                 tx,
                 amount,
             } => {
-                if self.available >= *amount {
-                    self.available = self.available - amount;
+                if self.account.available >= *amount {
+                    self.account.available = self.account.available - amount;
                 }
-                self.update_total();
             }
             Transaction::Dispute { client: _, tx } => {
                 todo!()
@@ -61,10 +76,81 @@ impl Account {
             }
         }
     }
+
+    pub fn account(&self) -> Account {
+        self.account.to_owned()
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Clone)]
+pub struct Account {
+    available: Decimal, // The total funds that are available for trading, staking, withdrawal, etc. This should be equal to the total - held amount
+    held: Decimal, // The total funds that are held for dispute. This should be equal to total - available amounts
+    locked: bool,  // Whether the account is locked. An account is locked if a charge back occurs
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Clone)]
+pub struct CsvOutputAccount {
+    client: ClientId,
+    available: Decimal, // The total funds that are available for trading, staking, withdrawal, etc. This should be equal to the total - held amount
+    held: Decimal, // The total funds that are held for dispute. This should be equal to total - available amounts
+    total: Decimal, // The total funds that are available or held. This should be equal to available + held
+    locked: bool,   // Whether the account is locked. An account is locked if a charge back occurs
+}
+
+impl From<(&ClientId, &AccountWithTransactions)> for CsvOutputAccount {
+    fn from(value: (&ClientId, &AccountWithTransactions)) -> Self {
+        Self {
+            client: value.0.clone(),
+            available: value.1.account.available(),
+            held: value.1.account.held(),
+            total: value.1.account.total(),
+            locked: value.1.account.locked(),
+        }
+    }
+}
+
+impl Default for Account {
+    fn default() -> Self {
+        Account {
+            held: dec!(0),
+            available: dec!(0),
+            locked: false,
+        }
+    }
+}
+
+impl Account {
+    pub fn new(available: Decimal, held: Decimal, locked: bool) -> Account {
+        Account {
+            available,
+            held,
+            locked,
+        }
+    }
+
+    /// Banker's rounding, also known as round-to-even, is a rounding method where numbers equidistant
+    /// from two integers are rounded to the nearest even integer.
+    /// This method is particularly useful in financial and statistical calculations to minimize bias and cumulative errors
+    pub fn available(&self) -> Decimal {
+        self.available.round_dp(4) // bankers rounding 0.00025 -> 0.0002  and 0.00015 -> 0.0002
+    }
+
+    pub fn held(&self) -> Decimal {
+        self.held.round_dp(4) // bankers rounding 0.00025 -> 0.0002  and 0.00015 -> 0.0002
+    }
+
+    pub fn total(&self) -> Decimal {
+        self.available.round_dp(4) + self.held.round_dp(4) // bankers rounding 0.00025 -> 0.0002  and 0.00015 -> 0.0002
+    }
+
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone, Serialize)]
-pub struct ClientId(u16);
+pub struct ClientId(pub u16);
 
 #[derive(Debug, Deserialize)]
 pub struct TransactionId(u32);
