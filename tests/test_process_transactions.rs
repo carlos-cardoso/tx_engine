@@ -1,16 +1,19 @@
-use std::path::Path;
+use std::{io, path::Path, sync::mpsc};
 
 use rust_decimal::dec;
 use tx_engine::{
     csv_input::{read_transactions_from_csv, transactions_from_reader},
     model::{Account, ClientId, Clients},
+    spawn_writer_thread,
 };
 
 #[test]
 fn deposits_withdrawals() {
     let transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
-    let mut clients = Clients::default();
+    let (tx, rx) = mpsc::channel();
+    let _thread_id = spawn_writer_thread(io::sink(), rx);
+    let mut clients = Clients::new(tx);
     clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
@@ -35,7 +38,11 @@ fn dispute() {
         .trim(csv::Trim::All) //trim whitespace around fields
         .from_reader(input_reader);
     let transactions_iter = transactions_from_reader(csv_reader);
-    let mut clients = Clients::default();
+
+    let (tx, rx) = mpsc::channel();
+    let _thread_id = spawn_writer_thread(io::sink(), rx);
+    let mut clients = Clients::new(tx);
+
     clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(0.5), dec!(1.0), false);
@@ -61,7 +68,11 @@ fn resolve() {
         .trim(csv::Trim::All) //trim whitespace around fields
         .from_reader(input_reader);
     let transactions_iter = transactions_from_reader(csv_reader);
-    let mut clients = Clients::default();
+
+    let (tx, rx) = mpsc::channel();
+    let _thread_id = spawn_writer_thread(io::sink(), rx);
+    let mut clients = Clients::new(tx);
+
     clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
@@ -87,7 +98,11 @@ fn chargeback() {
         .trim(csv::Trim::All) //trim whitespace around fields
         .from_reader(input_reader);
     let transactions_iter = transactions_from_reader(csv_reader);
-    let mut clients = Clients::default();
+
+    let (tx, rx) = mpsc::channel();
+    let _thread_id = spawn_writer_thread(io::sink(), rx);
+    let mut clients = Clients::new(tx);
+
     clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(0.5), dec!(0.0), true);
@@ -121,14 +136,19 @@ fn bankers_rounding() {
 fn output() {
     let transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
-    let mut clients = Clients::default();
+
+    let out: Vec<u8> = Vec::new();
+    let (tx, rx) = mpsc::channel();
+    let thread_id = spawn_writer_thread(out, rx);
+    let mut clients = Clients::new(tx);
+
     clients.load_transactions(transactions_iter);
 
     // create a Vec to write to (instead of stdout)
-    let mut out: Vec<u8> = Vec::new();
-    clients
-        .write(&mut out)
-        .expect("failed to write csv to output");
+    clients.write_non_locked();
+
+    let csv_writer = thread_id.join().expect("error joining thread");
+    let out = csv_writer.into_inner().expect("failed to get inner");
 
     // sort the lines (Since the order of the csv lines is non-deterministic since we use a HashMap internally)
     let output_string = String::from_utf8(out).expect("invalid utf8");

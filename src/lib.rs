@@ -4,6 +4,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use csv::Writer;
 use model::{Account, ClientId, CsvOutputAccount};
 use tracing::error;
 use tracing_subscriber::EnvFilter;
@@ -26,7 +27,7 @@ pub fn setup_tracing_logs() {
 pub fn spawn_writer_thread<W: io::Write + Send + 'static>(
     wtr: W,
     rx: Receiver<(ClientId, Account)>,
-) -> JoinHandle<()> {
+) -> JoinHandle<Writer<W>> {
     thread::spawn(move || {
         let mut csv_writer = csv::WriterBuilder::new().from_writer(wtr);
         loop {
@@ -45,5 +46,6 @@ pub fn spawn_writer_thread<W: io::Write + Send + 'static>(
                 }
             }
         }
+        csv_writer
     })
 }

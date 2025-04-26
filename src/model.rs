@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, io, ops::Not, sync::mpsc::Sender};
+use std::{collections::HashMap, fmt::Display, ops::Not, sync::mpsc::Sender};
 
 use rust_decimal::{Decimal, dec};
 use serde::{Deserialize, Serialize};
@@ -65,19 +65,7 @@ impl Clients {
         }
     }
 
-    /// Write the output csv to a Writer (e.g. to stdout)
-    pub fn write<W: io::Write>(&self, wtr: W) -> io::Result<()> {
-        let mut csv_writer = csv::WriterBuilder::new().from_writer(wtr);
-
-        for (client, account) in self.accounts.iter() {
-            csv_writer.serialize(CsvOutputAccount::from((client, account)))?;
-        }
-
-        csv_writer.flush()?;
-        Ok(())
-    }
-
-    pub fn finalize(self) {
+    pub fn write_non_locked(self) {
         for (client, account) in self
             .accounts
             .into_iter()

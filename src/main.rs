@@ -18,14 +18,15 @@ fn main() -> io::Result<()> {
 
     let (tx, rx) = std::sync::mpsc::channel();
     let thread_id = spawn_writer_thread(io::stdout(), rx);
+
     // apply the transactions
     info!("Applying transactions...");
     let mut clients = Clients::new(tx);
-    clients.load_transactions(transactions_iter);
+    clients.load_transactions(transactions_iter); //will early write accounts that become locked
 
     // output to stdout
-    info!("Writing remaining to stdout...");
-    clients.finalize(); // writes the remaining to stdout
+    info!("Writing remaining clients to stdout...");
+    clients.write_non_locked(); // write the remaining clients to stdout
 
     thread_id.join().expect("failed to join writer thread");
     info!("Finished processing transactions");

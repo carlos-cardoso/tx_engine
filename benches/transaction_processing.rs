@@ -11,7 +11,7 @@ use tx_engine::csv_input::transactions_from_reader;
 use tx_engine::model::{ClientId, Clients, InputCsvRecord, TransactionId};
 use tx_engine::spawn_writer_thread;
 
-const NUM_TRANSACTIONS_BENCH: u32 = 100_000; // We can adjust size for benchmark duration
+const NUM_TRANSACTIONS_BENCH: u32 = 1000_000; // We can adjust size for benchmark duration
 const NUM_CLIENTS_BENCH: u16 = u16::MAX;
 const MAX_AMOUNT_BENCH: f64 = 1000.0;
 
@@ -143,11 +143,12 @@ fn benchmark_transaction_processing(c: &mut Criterion) {
                     let (tx, rx) = mpsc::channel();
                     let thread_handle = spawn_writer_thread(io::sink(), rx);
                     let mut clients = Clients::new(tx);
-                    // The actual work: consume the iterator and update client state
+
+                    // The actual work: consume the iterator and update client state also serializes and sends output to sink
                     let transcations_result = clients.load_transactions(transactions_iter);
 
-                    // The actual work: write output to sink
-                    clients.finalize();
+                    // write remaining output to sink
+                    clients.write_non_locked();
                     let thread_result = thread_handle.join();
 
                     // Use black_box to prevent the compiler optimizing away the result
