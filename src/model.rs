@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, io};
+use std::{collections::HashMap, fmt::Display, io, ops::Not, sync::mpsc::Sender};
 
 use rust_decimal::{Decimal, dec};
 use serde::{Deserialize, Serialize};
@@ -7,10 +7,21 @@ use tracing::{Level, error, instrument, span, trace, warn};
 use crate::csv_input::ConversionError;
 
 /// Clients contains the mapping between the ClientId's and the Client Accounts
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Clients {
     pub accounts: HashMap<ClientId, Account>, // Client accounts
-    pub disputable_transactions: HashMap<TransactionId, TransactionStatus>, // Transactions that can be disputed or resolved or chargedback (shared since TransactionIds are globally unique)
+    pub disputable_transactions: HashMap<TransactionId, DisputableTransactionStatus>, // Transactions that can be disputed or resolved or chargedback (shared since TransactionIds are globally unique)
+    pub tx: Sender<(ClientId, Account)>,
+}
+
+impl Clients {
+    pub fn new(tx: Sender<(ClientId, Account)>) -> Clients {
+        Clients {
+            accounts: HashMap::new(),
+            disputable_transactions: HashMap::new(),
+            tx,
+        }
+    }
 }
 
 impl Clients {
@@ -28,13 +39,25 @@ impl Clients {
                     let span = span!(Level::TRACE, "applying transaction");
                     let _enter = span.enter();
                     self.accounts
-                        .entry(client_id)
+                        .entry(client_id.clone())
                         .and_modify(|account| {
-                            account.apply(&transaction, &mut self.disputable_transactions)
+                            if account.locked().not() {
+                                account.apply(&transaction, &mut self.disputable_transactions);
+                                if account.locked() {
+                                    self.tx
+                                        .send((client_id.clone(), account.clone()))
+                                        .expect("failed to send");
+                                }
+                            }
                         })
                         .or_insert_with(|| {
                             let mut account = Account::default();
                             account.apply(&transaction, &mut self.disputable_transactions);
+                            if account.locked() {
+                                self.tx
+                                    .send((client_id.clone(), account.clone()))
+                                    .expect("failed to send");
+                            }
                             account
                         });
                 }
@@ -53,11 +76,26 @@ impl Clients {
         csv_writer.flush()?;
         Ok(())
     }
+
+    pub fn finalize(self) {
+        for (client, account) in self
+            .accounts
+            .into_iter()
+            .filter(|(_, account)| account.locked().not())
+        {
+            if let Err(err) = self.tx.send((client, account)) {
+                error!(%err, "failed to send to writer");
+            }
+        }
+    }
 }
 
-// Possible states of a disputable transaction
+// Possible states of a disputable transaction (deposit)
+// Criterion shows that there is a performance gain (6%) in not having a ChargedBack variant and simply
+// removing transactions that were charged back
+// the Decimal is the ammount involved in the deposit
 #[derive(Debug)]
-pub enum TransactionStatus {
+pub enum DisputableTransactionStatus {
     NotDisputedAmount(Decimal),
     DisputedAmount(Decimal),
 }
@@ -67,74 +105,85 @@ impl Account {
     pub fn apply(
         &mut self,
         transaction: &Transaction,
-        disputable_transactions: &mut HashMap<TransactionId, TransactionStatus>,
+        disputable_transactions: &mut HashMap<TransactionId, DisputableTransactionStatus>,
     ) {
-        match transaction {
-            Transaction::Deposit {
-                client: _,
-                tx,
-                amount,
-            } => {
-                self.available += amount;
-                disputable_transactions.insert(
-                    tx.to_owned(),
-                    TransactionStatus::NotDisputedAmount(amount.to_owned()),
-                );
-                trace!("Applied deposit");
-            }
-            Transaction::Withdrawal {
-                client: _,
-                tx: _,
-                amount,
-            } => {
-                if self.available >= *amount {
-                    self.available -= amount;
-                    trace!(%amount, "Applied whitdrawal");
-                } else {
-                    warn!(%amount, %self.available, "not enough funds available for whithdrawal")
+        if self.locked.not() {
+            // if account is not locked
+            match transaction {
+                Transaction::Deposit {
+                    client: _,
+                    tx,
+                    amount,
+                } => {
+                    self.available += amount;
+                    disputable_transactions.insert(
+                        tx.to_owned(),
+                        DisputableTransactionStatus::NotDisputedAmount(amount.to_owned()),
+                    );
+                    trace!("Applied deposit");
                 }
-            }
-            Transaction::Dispute { client: _, tx } => {
-                if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
-                    if let TransactionStatus::NotDisputedAmount(amount) = disputable_transaction {
-                        self.held += *amount;
-                        self.available -= *amount;
-                        *disputable_transaction = TransactionStatus::DisputedAmount(*amount);
-                        trace!(%tx, "Disputed transaction");
+                Transaction::Withdrawal {
+                    client: _,
+                    tx: _,
+                    amount,
+                } => {
+                    if self.available >= *amount {
+                        self.available -= amount;
+                        trace!(%amount, "Applied whitdrawal");
                     } else {
-                        warn!(%tx, ?disputable_transaction, "Transaction cannot be disputed");
+                        warn!(%amount, %self.available, "not enough funds available for whithdrawal")
                     }
-                } else {
-                    warn!(%tx, "transaction does not exist in disputable transactions");
                 }
-            }
-            Transaction::Resolve { client: _, tx } => {
-                if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
-                    if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
-                        self.held -= *amount;
-                        self.available += *amount;
-                        *disputable_transaction = TransactionStatus::NotDisputedAmount(*amount);
-                        trace!(%tx, "Resolved transaction");
+                Transaction::Dispute { client: _, tx } => {
+                    if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
+                        if let DisputableTransactionStatus::NotDisputedAmount(amount) =
+                            disputable_transaction
+                        {
+                            self.held += *amount;
+                            self.available -= *amount;
+                            *disputable_transaction =
+                                DisputableTransactionStatus::DisputedAmount(*amount);
+                            trace!(%tx, "Disputed transaction");
+                        } else {
+                            warn!(%tx, ?disputable_transaction, "Transaction cannot be disputed");
+                        }
                     } else {
-                        warn!(%tx, ?disputable_transaction, "Transaction cannot be resolved");
+                        warn!(%tx, "transaction does not exist in disputable transactions");
                     }
-                } else {
-                    warn!(%tx, "transaction does not exist in disputable transactions");
                 }
-            }
-            Transaction::Chargeback { client: _, tx } => {
-                if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
-                    if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
-                        self.held -= *amount;
-                        disputable_transactions.remove(tx); // if a transaction was charged back then it cannot be disputed again
-                        trace!(%tx, "Transaction was chargedback");
+                Transaction::Resolve { client: _, tx } => {
+                    if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
+                        if let DisputableTransactionStatus::DisputedAmount(amount) =
+                            disputable_transaction
+                        {
+                            self.held -= *amount;
+                            self.available += *amount;
+                            *disputable_transaction =
+                                DisputableTransactionStatus::NotDisputedAmount(*amount);
+                            trace!(%tx, "Resolved transaction");
+                        } else {
+                            warn!(%tx, ?disputable_transaction, "Transaction cannot be resolved");
+                        }
                     } else {
-                        warn!(%tx, ?disputable_transaction, "Transaction cannot be charged back");
+                        warn!(%tx, "transaction does not exist in disputable transactions");
                     }
-                    self.locked = true;
-                    trace!(%tx, "Account locked");
-                } else {
-                    warn!(%tx, "transaction does not exist in disputable transactions");
+                }
+                Transaction::Chargeback { client: _, tx } => {
+                    if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
+                        if let DisputableTransactionStatus::DisputedAmount(amount) =
+                            disputable_transaction
+                        {
+                            self.held -= *amount;
+                            disputable_transactions.remove(tx); // if a transaction was charged back then it cannot be disputed again
+                            trace!(%tx, "Transaction was chargedback");
+                        } else {
+                            warn!(%tx, ?disputable_transaction, "Transaction cannot be charged back");
+                        }
+                        self.locked = true;
+                        trace!(%tx, "Account locked");
+                    } else {
+                        warn!(%tx, "transaction does not exist in disputable transactions");
+                    }
                 }
             }
         }

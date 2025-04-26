@@ -1,7 +1,16 @@
 # Readme
 
+## Assumptions:
+  - Only deposits can be disputed and then resolved/chargedback.
+  - Once locked the account cannot process more transactions.
+  - Values are rounded using bankers rounding to 4 decimal places at input/output
 
-## Design pattern decisions:
+## Design patterns:
+
+ - Since the toy problem consists of reading a csv input that is assumed to be in order, I skipped using async or parallelism since (except for locked accounts) we can only know the final state of the accounts once we go through the entire file.
+ - In the case of locked accounts we can return the state of the account imediately and discard the transactions of that account.
+
+ - Transaction Ids are globally unique so we can keep a single 
 
 ### Non async:
 

@@ -6,11 +6,13 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use std::collections::HashSet;
 use std::io::{self, Cursor, Seek, SeekFrom};
+use std::sync::mpsc;
 use tx_engine::csv_input::transactions_from_reader;
 use tx_engine::model::{ClientId, Clients, InputCsvRecord, TransactionId};
+use tx_engine::spawn_writer_thread;
 
 const NUM_TRANSACTIONS_BENCH: u32 = 100_000; // We can adjust size for benchmark duration
-const NUM_CLIENTS_BENCH: u16 = 10000;
+const NUM_CLIENTS_BENCH: u16 = u16::MAX;
 const MAX_AMOUNT_BENCH: f64 = 1000.0;
 
 // Function to generate test data records
@@ -20,11 +22,12 @@ fn generate_records(num_records: u32) -> Vec<InputCsvRecord> {
 
     let mut deposit_transactions = HashSet::new(); // store previously generated deposits
     let mut disputed_transactions = HashSet::new(); // store previously generated disputes
-    for tx_id in 1..num_records {
+    for tx in 1..num_records {
         let client_id = rng.random_range(1..=NUM_CLIENTS_BENCH);
 
         let mut tx_type: Option<String> = None;
         let mut amount: Option<Decimal> = None;
+        let mut new_tx_id = tx;
 
         while tx_type.is_none() {
             // retry until we get a decision
@@ -35,7 +38,7 @@ fn generate_records(num_records: u32) -> Vec<InputCsvRecord> {
                         .unwrap_or_default()
                         .round_dp(4);
                     amount = Some(val);
-                    deposit_transactions.insert((tx_id, client_id));
+                    deposit_transactions.insert((new_tx_id, client_id));
                 }
                 x if x < 0.7 => {
                     tx_type = Some("withdrawal".to_string());
@@ -49,6 +52,7 @@ fn generate_records(num_records: u32) -> Vec<InputCsvRecord> {
                         tx_type = Some("dispute".to_string());
                         disputed_transactions.insert((tx_id, client_id));
                         deposit_transactions.remove(&(tx_id, client_id));
+                        new_tx_id = tx_id;
                         amount = None;
                     } else {
                         continue;
@@ -59,6 +63,7 @@ fn generate_records(num_records: u32) -> Vec<InputCsvRecord> {
                         tx_type = Some("resolve".to_string());
                         disputed_transactions.remove(&(tx_id, client_id));
                         amount = None;
+                        new_tx_id = tx_id;
                     } else {
                         continue;
                     }
@@ -68,6 +73,7 @@ fn generate_records(num_records: u32) -> Vec<InputCsvRecord> {
                         tx_type = Some("chargeback".to_string());
                         disputed_transactions.remove(&(tx_id, client_id));
                         amount = None;
+                        new_tx_id = tx_id;
                     } else {
                         continue;
                     }
@@ -78,7 +84,7 @@ fn generate_records(num_records: u32) -> Vec<InputCsvRecord> {
         records.push(InputCsvRecord {
             transaction_type: tx_type.expect("tx_type should always be some at this point"),
             client: ClientId(client_id),
-            tx: TransactionId(tx_id),
+            tx: TransactionId(new_tx_id),
             amount,
         });
     }
@@ -97,12 +103,22 @@ fn create_csv_buffer(records: &[InputCsvRecord]) -> Cursor<Vec<u8>> {
                 .expect("Failed to serialize record for bench");
         }
         writer.flush().expect("Failed to flush writer for bench");
-        // Reset the cursor position to the beginning for reading
     }
     let mut cursor = Cursor::new(buffer);
     cursor.seek(SeekFrom::Start(0)).unwrap();
     cursor
 }
+
+// use std::fs::File;
+// use std::path::Path;
+// use std::io::write
+// write to a file to inspect
+// write_test_csv_to_file("/tmp/testfile.csv", &records);
+// fn write_test_csv_to_file(path: &str, records: &[InputCsvRecord]) {
+//     let mut file = File::create(path).expect("failed to create file");
+//     let buffer = create_csv_buffer(&records);
+//     file.write_all(&buffer.into_inner()).unwrap();
+// }
 
 fn benchmark_transaction_processing(c: &mut Criterion) {
     let mut group = c.benchmark_group("CSV Processing");
@@ -123,17 +139,20 @@ fn benchmark_transaction_processing(c: &mut Criterion) {
                         .from_reader(&mut csv_buffer); // Read from the buffer
 
                     let transactions_iter = transactions_from_reader(reader);
-                    let mut clients = Clients::default();
+
+                    let (tx, rx) = mpsc::channel();
+                    let thread_handle = spawn_writer_thread(io::sink(), rx);
+                    let mut clients = Clients::new(tx);
                     // The actual work: consume the iterator and update client state
                     let transcations_result = clients.load_transactions(transactions_iter);
 
                     // The actual work: write output to sink
-                    let output_result = clients.write(io::sink()).expect("failed to write to sink");
+                    clients.finalize();
+                    let thread_result = thread_handle.join();
 
                     // Use black_box to prevent the compiler optimizing away the result
                     criterion::black_box(transcations_result);
-                    criterion::black_box(output_result);
-                    criterion::black_box(clients); // Also prevent clients from being optimized away
+                    criterion::black_box(thread_result).expect("failed to join thread");
                 },
                 BatchSize::SmallInput,
             );
