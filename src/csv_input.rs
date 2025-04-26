@@ -2,6 +2,7 @@ use csv::Reader;
 use model::{InputCsvRecord, Transaction};
 use std::path::Path;
 use thiserror::Error;
+use tracing::instrument;
 
 use crate::model;
 
@@ -27,6 +28,7 @@ pub enum ConversionError {
 }
 
 // Loads the csv in path as a Iterator over transactions
+#[instrument]
 pub fn read_transactions_from_csv(
     csv_path: &Path,
 ) -> Result<impl Iterator<Item = Result<Transaction, ConversionError>>, ConversionError> {
@@ -39,6 +41,7 @@ pub fn read_transactions_from_csv(
 }
 
 // Transforms a reader over a file into a iterator over transactions
+#[instrument(skip(csv_reader))]
 pub fn transactions_from_reader<T: std::io::Read>(
     csv_reader: Reader<T>,
 ) -> impl Iterator<Item = Result<Transaction, ConversionError>> {

@@ -1,7 +1,8 @@
-use std::{collections::HashMap, io};
+use std::{collections::HashMap, fmt::Display, io};
 
 use rust_decimal::{Decimal, dec};
 use serde::{Deserialize, Serialize};
+use tracing::{Level, error, instrument, span, trace, warn};
 
 use crate::csv_input::ConversionError;
 
@@ -11,23 +12,29 @@ pub struct Clients(pub HashMap<ClientId, AccountWithTransactions>);
 
 impl Clients {
     /// Mutate the client Accounts with an iterator over Transactions
+    #[instrument(skip(transactions))]
     pub fn load_transactions<T: Iterator<Item = Result<Transaction, ConversionError>>>(
         &mut self,
         transactions: T,
-    ) -> Result<(), ConversionError> {
+    ) {
         for transaction in transactions {
-            let transaction = transaction?; // early returns if there is a malformed transaction
-            let client_id = transaction.client_id();
-            self.0
-                .entry(client_id)
-                .and_modify(|account| account.apply(&transaction))
-                .or_insert_with(|| {
-                    let mut account = AccountWithTransactions::default();
-                    account.apply(&transaction);
-                    account
-                });
+            match transaction {
+                Err(err) => error!(error=%err, "Skipping invalid transaction in file"),
+                Ok(transaction) => {
+                    let client_id = transaction.client_id();
+                    let span = span!(Level::TRACE, "applying transaction");
+                    let _enter = span.enter();
+                    self.0
+                        .entry(client_id)
+                        .and_modify(|account| account.apply(&transaction))
+                        .or_insert_with(|| {
+                            let mut account = AccountWithTransactions::default();
+                            account.apply(&transaction);
+                            account
+                        });
+                }
+            }
         }
-        Ok(())
     }
 
     /// Write the output csv to a Writer (e.g. to stdout)
@@ -58,6 +65,7 @@ enum TransactionStatus {
 }
 
 impl AccountWithTransactions {
+    #[instrument]
     pub fn apply(&mut self, transaction: &Transaction) {
         match transaction {
             Transaction::Deposit {
@@ -70,6 +78,7 @@ impl AccountWithTransactions {
                     tx.to_owned(),
                     TransactionStatus::NotDisputedAmount(amount.to_owned()),
                 );
+                trace!("Applied deposit");
             }
             Transaction::Withdrawal {
                 client: _,
@@ -78,36 +87,52 @@ impl AccountWithTransactions {
             } => {
                 if self.account.available >= *amount {
                     self.account.available -= amount;
+                    trace!(%amount, "Applied whitdrawal");
+                } else {
+                    warn!(%amount, %self.account.available, "not enough funds available for whithdrawal")
                 }
             }
             Transaction::Dispute { client: _, tx } => {
                 if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
                     if let TransactionStatus::NotDisputedAmount(amount) = disputable_transaction {
-                        assert!(amount.is_sign_positive());
                         self.account.held += *amount;
                         self.account.available -= *amount;
                         *disputable_transaction = TransactionStatus::DisputedAmount(*amount);
+                        trace!(%tx, "Disputed transaction");
+                    } else {
+                        warn!(%tx, ?disputable_transaction, "Transaction cannot be disputed");
                     }
+                } else {
+                    warn!(%tx, "transaction does not exist in disputable transactions");
                 }
             }
             Transaction::Resolve { client: _, tx } => {
                 if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
                     if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
-                        assert!(amount.is_sign_positive());
                         self.account.held -= *amount;
                         self.account.available += *amount;
-                        *disputable_transaction = TransactionStatus::NotDisputedAmount(*amount)
+                        *disputable_transaction = TransactionStatus::NotDisputedAmount(*amount);
+                        trace!(%tx, "Resolved transaction");
+                    } else {
+                        warn!(%tx, ?disputable_transaction, "Transaction cannot be resolved");
                     }
+                } else {
+                    warn!(%tx, "transaction does not exist in disputable transactions");
                 }
             }
             Transaction::Chargeback { client: _, tx } => {
                 if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
                     if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
-                        assert!(amount.is_sign_positive());
                         self.account.held -= *amount;
                         *disputable_transaction = TransactionStatus::ChargedBack;
+                        trace!(%tx, "Transaction was chargedback");
+                    } else {
+                        warn!(%tx, ?disputable_transaction, "Transaction cannot be charged back");
                     }
                     self.account.locked = true;
+                    trace!(%tx, "Account locked");
+                } else {
+                    warn!(%tx, "transaction does not exist in disputable transactions");
                 }
             }
         }
@@ -188,8 +213,20 @@ impl Account {
 #[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone, Serialize)]
 pub struct ClientId(pub u16);
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
-pub struct TransactionId(u32);
+impl Display for ClientId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone, Serialize)]
+pub struct TransactionId(pub u32);
+
+impl Display for TransactionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Debug)]
 pub enum Transaction {
@@ -258,13 +295,13 @@ impl Transaction {
 }
 
 /// Type used to deserialize input csv lines
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct InputCsvRecord {
     #[serde(rename = "type")]
-    transaction_type: String,
-    client: ClientId,
-    tx: TransactionId,
-    amount: Option<Decimal>,
+    pub transaction_type: String,
+    pub client: ClientId,
+    pub tx: TransactionId,
+    pub amount: Option<Decimal>,
 }
 
 /// Converts from an InputCsvRecord to a Transaction

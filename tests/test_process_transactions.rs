@@ -11,9 +11,7 @@ fn deposits_withdrawals() {
     let transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
     let mut clients = Clients::default();
-    clients
-        .load_transactions(transactions_iter)
-        .expect("invalid transactions");
+    clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
@@ -38,9 +36,7 @@ fn dispute() {
         .from_reader(input_reader);
     let transactions_iter = transactions_from_reader(csv_reader);
     let mut clients = Clients::default();
-    clients
-        .load_transactions(transactions_iter)
-        .expect("invalid transactions");
+    clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(0.5), dec!(1.0), false);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
@@ -66,9 +62,7 @@ fn resolve() {
         .from_reader(input_reader);
     let transactions_iter = transactions_from_reader(csv_reader);
     let mut clients = Clients::default();
-    clients
-        .load_transactions(transactions_iter)
-        .expect("invalid transactions");
+    clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
@@ -94,9 +88,7 @@ fn chargeback() {
         .from_reader(input_reader);
     let transactions_iter = transactions_from_reader(csv_reader);
     let mut clients = Clients::default();
-    clients
-        .load_transactions(transactions_iter)
-        .expect("invalid transactions");
+    clients.load_transactions(transactions_iter);
 
     let expected_client_1 = Account::new(dec!(0.5), dec!(0.0), true);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
@@ -130,9 +122,7 @@ fn output() {
     let transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
     let mut clients = Clients::default();
-    clients
-        .load_transactions(transactions_iter)
-        .expect("invalid transactions");
+    clients.load_transactions(transactions_iter);
 
     // create a Vec to write to (instead of stdout)
     let mut out: Vec<u8> = Vec::new();
