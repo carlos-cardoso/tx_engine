@@ -14,7 +14,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"]}
 [dev-dependencies]
 criterion = "0.5"
 rand = "0.9"
-tempfile = "3"
 
 [[bench]]
 name = "transaction_processing"

@@ -42,12 +42,16 @@ impl Clients {
                         .entry(client_id.clone())
                         .and_modify(|account| {
                             if account.locked().not() {
+                                //if not locked
                                 account.apply(&transaction, &mut self.disputable_transactions);
                                 if account.locked() {
                                     self.tx
                                         .send((client_id.clone(), account.clone()))
                                         .expect("failed to send");
                                 }
+                            }
+                            else{
+                                warn!(%client_id, ?transaction, "Tried to apply transction to a locked account");
                             }
                         })
                         .or_insert_with(|| {
