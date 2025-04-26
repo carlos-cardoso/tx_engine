@@ -15,8 +15,8 @@ fn deposits_withdrawals() {
 
     let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
-    assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
-    assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
+    assert_eq!(clients.accounts[&ClientId(1)], expected_client_1);
+    assert_eq!(clients.accounts[&ClientId(2)], expected_client_2);
 }
 
 #[test]
@@ -40,8 +40,8 @@ fn dispute() {
 
     let expected_client_1 = Account::new(dec!(0.5), dec!(1.0), false);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
-    assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
-    assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
+    assert_eq!(clients.accounts[&ClientId(1)], expected_client_1);
+    assert_eq!(clients.accounts[&ClientId(2)], expected_client_2);
 }
 
 #[test]
@@ -66,8 +66,8 @@ fn resolve() {
 
     let expected_client_1 = Account::new(dec!(1.5), dec!(0.0), false);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
-    assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
-    assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
+    assert_eq!(clients.accounts[&ClientId(1)], expected_client_1);
+    assert_eq!(clients.accounts[&ClientId(2)], expected_client_2);
 }
 
 #[test]
@@ -92,8 +92,8 @@ fn chargeback() {
 
     let expected_client_1 = Account::new(dec!(0.5), dec!(0.0), true);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), false);
-    assert_eq!(clients.0[&ClientId(1)].account(), expected_client_1);
-    assert_eq!(clients.0[&ClientId(2)].account(), expected_client_2);
+    assert_eq!(clients.accounts[&ClientId(1)], expected_client_1);
+    assert_eq!(clients.accounts[&ClientId(2)], expected_client_2);
 }
 
 #[test]

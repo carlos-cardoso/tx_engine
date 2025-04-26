@@ -11,6 +11,6 @@ pub fn setup_tracing_logs() {
         // .with_thread_ids(true) //unecessary for a single threaded application
         .with_target(false)
         .with_writer(std::io::stderr) // write to stderr to not polute the stdout that is meant to be piped to a csv file
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(EnvFilter::from_default_env()) // use env filter (e.g. RUST_LOG=trace cargo run -- transactions.csv)
         .init();
 }

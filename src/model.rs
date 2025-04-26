@@ -8,7 +8,10 @@ use crate::csv_input::ConversionError;
 
 /// Clients contains the mapping between the ClientId's and the Client Accounts
 #[derive(Debug, Default)]
-pub struct Clients(pub HashMap<ClientId, AccountWithTransactions>);
+pub struct Clients {
+    pub accounts: HashMap<ClientId, Account>, // Client accounts
+    pub disputable_transactions: HashMap<TransactionId, TransactionStatus>, // Transactions that can be disputed or resolved or chargedback (shared since TransactionIds are globally unique)
+}
 
 impl Clients {
     /// Mutate the client Accounts with an iterator over Transactions
@@ -24,12 +27,14 @@ impl Clients {
                     let client_id = transaction.client_id();
                     let span = span!(Level::TRACE, "applying transaction");
                     let _enter = span.enter();
-                    self.0
+                    self.accounts
                         .entry(client_id)
-                        .and_modify(|account| account.apply(&transaction))
+                        .and_modify(|account| {
+                            account.apply(&transaction, &mut self.disputable_transactions)
+                        })
                         .or_insert_with(|| {
-                            let mut account = AccountWithTransactions::default();
-                            account.apply(&transaction);
+                            let mut account = Account::default();
+                            account.apply(&transaction, &mut self.disputable_transactions);
                             account
                         });
                 }
@@ -41,7 +46,7 @@ impl Clients {
     pub fn write<W: io::Write>(&self, wtr: W) -> io::Result<()> {
         let mut csv_writer = csv::WriterBuilder::new().from_writer(wtr);
 
-        for (client, account) in self.0.iter() {
+        for (client, account) in self.accounts.iter() {
             csv_writer.serialize(CsvOutputAccount::from((client, account)))?;
         }
 
@@ -50,31 +55,28 @@ impl Clients {
     }
 }
 
-/// Type that contains information about disputable transactions and the account data
-#[derive(Debug, Default)]
-pub struct AccountWithTransactions {
-    disputable_transactions: HashMap<TransactionId, TransactionStatus>,
-    account: Account,
-}
-
+// Possible states of a disputable transaction
 #[derive(Debug)]
-enum TransactionStatus {
+pub enum TransactionStatus {
     NotDisputedAmount(Decimal),
     DisputedAmount(Decimal),
-    ChargedBack, //cannot be chargedback or disputed again
 }
 
-impl AccountWithTransactions {
+impl Account {
     #[instrument]
-    pub fn apply(&mut self, transaction: &Transaction) {
+    pub fn apply(
+        &mut self,
+        transaction: &Transaction,
+        disputable_transactions: &mut HashMap<TransactionId, TransactionStatus>,
+    ) {
         match transaction {
             Transaction::Deposit {
                 client: _,
                 tx,
                 amount,
             } => {
-                self.account.available += amount;
-                self.disputable_transactions.insert(
+                self.available += amount;
+                disputable_transactions.insert(
                     tx.to_owned(),
                     TransactionStatus::NotDisputedAmount(amount.to_owned()),
                 );
@@ -85,18 +87,18 @@ impl AccountWithTransactions {
                 tx: _,
                 amount,
             } => {
-                if self.account.available >= *amount {
-                    self.account.available -= amount;
+                if self.available >= *amount {
+                    self.available -= amount;
                     trace!(%amount, "Applied whitdrawal");
                 } else {
-                    warn!(%amount, %self.account.available, "not enough funds available for whithdrawal")
+                    warn!(%amount, %self.available, "not enough funds available for whithdrawal")
                 }
             }
             Transaction::Dispute { client: _, tx } => {
-                if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
+                if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
                     if let TransactionStatus::NotDisputedAmount(amount) = disputable_transaction {
-                        self.account.held += *amount;
-                        self.account.available -= *amount;
+                        self.held += *amount;
+                        self.available -= *amount;
                         *disputable_transaction = TransactionStatus::DisputedAmount(*amount);
                         trace!(%tx, "Disputed transaction");
                     } else {
@@ -107,10 +109,10 @@ impl AccountWithTransactions {
                 }
             }
             Transaction::Resolve { client: _, tx } => {
-                if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
+                if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
                     if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
-                        self.account.held -= *amount;
-                        self.account.available += *amount;
+                        self.held -= *amount;
+                        self.available += *amount;
                         *disputable_transaction = TransactionStatus::NotDisputedAmount(*amount);
                         trace!(%tx, "Resolved transaction");
                     } else {
@@ -121,25 +123,21 @@ impl AccountWithTransactions {
                 }
             }
             Transaction::Chargeback { client: _, tx } => {
-                if let Some(disputable_transaction) = self.disputable_transactions.get_mut(tx) {
+                if let Some(disputable_transaction) = disputable_transactions.get_mut(tx) {
                     if let TransactionStatus::DisputedAmount(amount) = disputable_transaction {
-                        self.account.held -= *amount;
-                        *disputable_transaction = TransactionStatus::ChargedBack;
+                        self.held -= *amount;
+                        disputable_transactions.remove(tx); // if a transaction was charged back then it cannot be disputed again
                         trace!(%tx, "Transaction was chargedback");
                     } else {
                         warn!(%tx, ?disputable_transaction, "Transaction cannot be charged back");
                     }
-                    self.account.locked = true;
+                    self.locked = true;
                     trace!(%tx, "Account locked");
                 } else {
                     warn!(%tx, "transaction does not exist in disputable transactions");
                 }
             }
         }
-    }
-
-    pub fn account(&self) -> Account {
-        self.account.to_owned()
     }
 }
 
@@ -159,14 +157,14 @@ pub struct CsvOutputAccount {
     locked: bool,   // Whether the account is locked. An account is locked if a charge back occurs
 }
 
-impl From<(&ClientId, &AccountWithTransactions)> for CsvOutputAccount {
-    fn from(value: (&ClientId, &AccountWithTransactions)) -> Self {
+impl From<(&ClientId, &Account)> for CsvOutputAccount {
+    fn from(value: (&ClientId, &Account)) -> Self {
         Self {
             client: value.0.clone(),
-            available: value.1.account.available(),
-            held: value.1.account.held(),
-            total: value.1.account.total(),
-            locked: value.1.account.locked(),
+            available: value.1.available(),
+            held: value.1.held(),
+            total: value.1.total(),
+            locked: value.1.locked(),
         }
     }
 }
