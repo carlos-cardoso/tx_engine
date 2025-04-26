@@ -96,8 +96,8 @@ client,available,held,total,locked
   - Dependencies: Uses csv, serde, rust_decimal, thiserror and tracing crates. For benchmarking it uses criterion and rand. 
 
 ## Concurrency Model
-    - Sequential Processing: The core transaction processing logic reads and handles transactions one by one from the input stream. Given the sequential nature of the input CSV and the dependency of transaction outcomes on prior states for a given client, parallelizing the processing of transactions for the same client is complex and not implemented. Parallelizing processing across different clients could be possible but adds complexity.
-    - Dedicated Writer Thread: A separate thread handles writing the output CSV records to stdout. This allows the main processing thread to continue handling transactions while output is being written concurrently. Locked accounts can be written out immediately by the writer thread once the chargeback is processed, potentially reducing overall execution time and memory pressure for scenarios with many locked accounts.
+    - **Sequential Processing**: The core transaction processing logic reads and handles transactions one by one from the input stream. Given the sequential nature of the input CSV and the dependency of transaction outcomes on prior states for a given client, parallelizing the processing of transactions for the same client is complex and not implemented. Parallelizing processing across different clients could be possible but adds complexity. There would also be little gain since we need to wait for the end of the file to know that the client account will not be further modified.
+    - **Dedicated Writer Thread**: A separate thread handles writing the output CSV records to stdout. This allows the main processing thread to continue handling transactions while output is being written concurrently. Locked accounts can be written out immediately by the writer thread once the chargeback is processed, potentially reducing overall execution time and memory pressure for scenarios with many locked accounts.
 
 ## Benchmarking: Dedicated Writer Thread
 
@@ -128,6 +128,6 @@ Benchmark 1: cargo run --release -- /home/carlos/testfile.csv
 
 ## Potential Future Optimizations / Alternative Designs
 
-   - Async Processing: If the input source were different (e.g., network streams, message queues), an async approach (e.g., using Tokio) would be suitable for I/O-bound operations.
-   - Database Backend: For persistence, larger scale, or more complex queries, integrating a database (SQL or NoSQL Key/Value store) would be necessary.
-   - Event Sourcing / CQRS: For high-throughput systems or systems requiring detailed audit trails, Event Sourcing could be employed. Commands (transactions) generate events stored immutably. Account states (read models) would be derived from these events, potentially using Command Query Responsibility Segregation (CQRS) to optimize read and write paths separately.
+   - **Async Processing**: If the input source were different (e.g., network streams, message queues), an async approach (e.g., using Tokio) would be suitable for I/O-bound operations.
+   - **Database Backend**: For persistence, larger scale, or more complex queries, integrating a database (SQL or NoSQL Key/Value store) would be necessary.
+   - **Event Sourcing / CQRS**: For high-throughput systems or systems requiring detailed audit trails, Event Sourcing could be employed. Commands (transactions) generate events stored immutably. Account states (read models) would be derived from these events, potentially using Command Query Responsibility Segregation (CQRS) to optimize read and write paths separately.
