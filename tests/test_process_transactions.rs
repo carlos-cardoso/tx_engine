@@ -112,6 +112,40 @@ fn chargeback() {
 }
 
 #[test]
+//deposit to a locked account should not change anything
+fn locked() {
+    let input_reader = r#"
+        type, client, tx, amount
+        deposit, 1, 1, 1.0
+        deposit, 2, 2, 2.0
+        deposit, 1, 3, 2.0
+        withdrawal, 1, 4, 1.5
+        withdrawal, 2, 5, 3.0
+        dispute, 2, 5,
+        dispute, 1, 1,
+        chargeback, 1, 1,
+        chargeback, 2, 2,
+        deposit, 1, 6, 1.0
+        withdrawal, 2, 7, 1.0"#
+        .as_bytes();
+    let csv_reader = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All) //trim whitespace around fields
+        .from_reader(input_reader);
+    let transactions_iter = transactions_from_reader(csv_reader);
+
+    let (tx, rx) = mpsc::channel();
+    let _thread_id = spawn_writer_thread(io::sink(), rx);
+    let mut clients = Clients::new(tx);
+
+    clients.load_transactions(transactions_iter);
+
+    let expected_client_1 = Account::new(dec!(0.5), dec!(0.0), true);
+    let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), true);
+    assert_eq!(clients.accounts[&ClientId(1)], expected_client_1);
+    assert_eq!(clients.accounts[&ClientId(2)], expected_client_2);
+}
+
+#[test]
 fn bankers_rounding() {
     let client_15 = Account::new(dec!(0.00015), dec!(0.0), false);
     let client_25 = Account::new(dec!(0.00025), dec!(0.0), false);
