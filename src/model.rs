@@ -42,14 +42,14 @@ impl Clients {
                     let span = span!(Level::TRACE, "applying transaction");
                     let _enter = span.enter();
                     self.accounts
-                        .entry(client_id.clone())
+                        .entry(client_id)
                         .and_modify(|account| {
                             if account.locked().not() {
                                 //if not locked
                                 account.apply(&transaction, &mut self.disputable_transactions);
                                 if account.locked() { // became locked, we can send this account to the output imediately
                                     self.output_sender
-                                        .send((client_id.clone(), account.clone()))
+                                        .send((client_id, account.clone()))
                                         .expect("failed to send");
                                 }
                             }
@@ -62,7 +62,7 @@ impl Clients {
                             account.apply(&transaction, &mut self.disputable_transactions);
                             if account.locked() { // became locked, we can send this account to the output imediately
                                 self.output_sender
-                                    .send((client_id.clone(), account.clone()))
+                                    .send((client_id, account.clone()))
                                     .expect("failed to send");
                             }
                             account
@@ -257,7 +257,7 @@ pub struct CsvOutputAccount {
 impl From<(&ClientId, &Account)> for CsvOutputAccount {
     fn from(value: (&ClientId, &Account)) -> Self {
         Self {
-            client: value.0.clone(),
+            client: *value.0,
             available: value.1.available(),
             held: value.1.held(),
             total: value.1.total(),
@@ -385,7 +385,7 @@ impl Transaction {
             Transaction::Resolve { client, tx: _ } => client,
             Transaction::Chargeback { client, tx: _ } => client,
         }
-        .clone()
+        .to_owned()
     }
 }
 

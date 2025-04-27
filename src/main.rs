@@ -5,7 +5,7 @@ use tx_engine::{
 };
 
 fn main() -> io::Result<()> {
-    setup_tracing_logs(); // initialize logging
+    setup_tracing_logs(); // initialize logging to stderr
     info!("Starting the transactions processing application...");
 
     let mut args = env::args();

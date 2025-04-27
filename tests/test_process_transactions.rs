@@ -1,7 +1,6 @@
 use std::{io, path::Path, sync::mpsc};
 
 use rust_decimal::dec;
-use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 use tx_engine::{
     csv_input::{read_transactions_from_csv, transactions_from_reader},
     model::{Account, ClientId, Clients, OutputMode},
@@ -10,6 +9,7 @@ use tx_engine::{
 
 #[test]
 fn deposits_withdrawals() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
     let (tx, rx) = mpsc::channel();
@@ -25,6 +25,7 @@ fn deposits_withdrawals() {
 
 #[test]
 fn dispute() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let input_reader = r#"
         type, client, tx, amount
         deposit, 1, 1, 1.0
@@ -54,6 +55,7 @@ fn dispute() {
 
 #[test]
 fn resolve() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let input_reader = r#"
         type, client, tx, amount
         deposit, 1, 1, 1.0
@@ -84,6 +86,7 @@ fn resolve() {
 
 #[test]
 fn chargeback() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let input_reader = r#"
         type, client, tx, amount
         deposit, 1, 1, 1.0
@@ -115,9 +118,7 @@ fn chargeback() {
 #[test]
 //deposit to a locked account should not change anything
 fn locked() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let input_reader = r#"
         type, client, tx, amount
         deposit, 1, 1, 1.0
@@ -173,6 +174,7 @@ fn bankers_rounding() {
 #[test]
 /// Validate that we print the expected output
 fn output() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
 

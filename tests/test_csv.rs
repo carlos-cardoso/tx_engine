@@ -4,6 +4,7 @@ use tx_engine::csv_input::{ConversionError, read_transactions_from_csv, transact
 /// loads the sample csv
 #[test]
 fn load_valid_csv() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let mut transactions_iter = read_transactions_from_csv(Path::new("data/input_example.csv"))
         .expect("failed to load the csv");
     assert!(transactions_iter.all(|t| t.is_ok()));
@@ -12,6 +13,7 @@ fn load_valid_csv() {
 /// the following tests use a in memory mocked csv to test validations of the transactions
 #[test]
 fn malformed_transaction() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -29,6 +31,7 @@ fn malformed_transaction() {
 
 #[test]
 fn invalid_transaction_type() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -49,6 +52,7 @@ fn invalid_transaction_type() {
 
 #[test]
 fn missing_amount() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -68,6 +72,7 @@ fn missing_amount() {
 
 #[test]
 fn invalid_client_id() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
@@ -86,6 +91,7 @@ fn invalid_client_id() {
 
 #[test]
 fn invalid_decimal() {
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     //mock csv input
     let input_reader = r#"
         type, client, tx, amount
