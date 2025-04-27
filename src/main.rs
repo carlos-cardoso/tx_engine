@@ -26,7 +26,9 @@ fn main() -> io::Result<()> {
 
     // output to stdout
     info!("Writing remaining clients to stdout...");
-    clients.write_non_locked(); // write the remaining clients to stdout
+    clients // write the remaining (non locked) clients to stdout
+        .send_to_output(tx_engine::model::OutputMode::SkipLocked)
+        .expect("failed to write to output");
 
     thread_id.join().expect("failed to join writer thread");
     info!("Finished processing transactions");

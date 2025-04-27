@@ -1,9 +1,10 @@
 use std::{io, path::Path, sync::mpsc};
 
 use rust_decimal::dec;
+use tracing_subscriber::{EnvFilter, util::SubscriberInitExt};
 use tx_engine::{
     csv_input::{read_transactions_from_csv, transactions_from_reader},
-    model::{Account, ClientId, Clients},
+    model::{Account, ClientId, Clients, OutputMode},
     spawn_writer_thread,
 };
 
@@ -114,6 +115,9 @@ fn chargeback() {
 #[test]
 //deposit to a locked account should not change anything
 fn locked() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
     let input_reader = r#"
         type, client, tx, amount
         deposit, 1, 1, 1.0
@@ -121,12 +125,13 @@ fn locked() {
         deposit, 1, 3, 2.0
         withdrawal, 1, 4, 1.5
         withdrawal, 2, 5, 3.0
-        dispute, 2, 5,
-        dispute, 1, 1,
-        chargeback, 1, 1,
+        dispute, 2, 2,
+        dispute, 1, 3,
+        deposit, 2, 6, 2.0
+        chargeback, 1, 3,
         chargeback, 2, 2,
-        deposit, 1, 6, 1.0
-        withdrawal, 2, 7, 1.0"#
+        deposit, 1, 7, 1.0
+        withdrawal, 2, 8, 1.0"#
         .as_bytes();
     let csv_reader = csv::ReaderBuilder::new()
         .trim(csv::Trim::All) //trim whitespace around fields
@@ -139,7 +144,7 @@ fn locked() {
 
     clients.load_transactions(transactions_iter);
 
-    let expected_client_1 = Account::new(dec!(0.5), dec!(0.0), true);
+    let expected_client_1 = Account::new(dec!(-0.5), dec!(0.0), true);
     let expected_client_2 = Account::new(dec!(2.0), dec!(0.0), true);
     assert_eq!(clients.accounts[&ClientId(1)], expected_client_1);
     assert_eq!(clients.accounts[&ClientId(2)], expected_client_2);
@@ -179,7 +184,9 @@ fn output() {
     clients.load_transactions(transactions_iter);
 
     // create a Vec to write to (instead of stdout)
-    clients.write_non_locked();
+    clients
+        .send_to_output(OutputMode::SkipLocked)
+        .expect("failed to write to output");
 
     let csv_writer = thread_id.join().expect("error joining thread");
     let out = csv_writer.into_inner().expect("failed to get inner");

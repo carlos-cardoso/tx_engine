@@ -69,7 +69,7 @@ client,available,held,total,locked
  cargo bench
 ```
 
-4. See the Logs: (error, info, warn, trace) 
+4. See the Logs (error, info, warn, trace) (errors are used for parsing and external errors, warn for logical errors (like insuficient funds))
 
 ```bash
  RUST_LOG=info cargo run --release -- data/input_example.csv > out.csv
@@ -80,7 +80,7 @@ client,available,held,total,locked
 
   - Client IDs: Clients are represented by u16 integers. New client records are created automatically if a transaction references a non-existent client.
   - Transaction IDs: Transaction IDs (u32) are assumed to be globally unique for transaction types that introduce funds.
-  - Amount Precision: Uses rust_decimal with a scale of 4 for financial calculations.
+  - Amount Precision: Uses rust_decimal with a scale of 4 for financial calculations. Bankers rounding is used on input and output (Bankers rounding is used minimizes cumulative rounding bias in financial calculations).
 
 #### Error Handling:
 
@@ -96,7 +96,7 @@ client,available,held,total,locked
   - Dependencies: Uses csv, serde, rust_decimal, thiserror and tracing crates. For benchmarking it uses criterion and rand. 
 
 ## Concurrency Model
-    - **Sequential Processing**: The core transaction processing logic reads and handles transactions one by one from the input stream. Given the sequential nature of the input CSV and the dependency of transaction outcomes on prior states for a given client, parallelizing the processing of transactions for the same client is complex and not implemented. Parallelizing processing across different clients could be possible but adds complexity. There would also be little gain since we need to wait for the end of the file to know that the client account will not be further modified.
+    - **Sequential Processing**: The core transaction processing logic reads and handles transactions one by one from the input stream. Given the sequential nature of the input CSV and the dependency of transaction outcomes on prior states for a given client, parallelizing the processing of transactions for the same client is complex and not implemented. Parallelizing processing across different clients could be possible but adds complexity. There would also be little gain for this toy problem since we need to wait for the end of the file to know that the client account will not be further modified.
     - **Dedicated Writer Thread**: A separate thread handles writing the output CSV records to stdout. This allows the main processing thread to continue handling transactions while output is being written concurrently. Locked accounts can be written out immediately by the writer thread once the chargeback is processed, potentially reducing overall execution time and memory pressure for scenarios with many locked accounts.
 
 ## Benchmarking: Dedicated Writer Thread

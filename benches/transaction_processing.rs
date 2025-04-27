@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::io::{self, Cursor, Seek, SeekFrom};
 use std::sync::mpsc;
 use tx_engine::csv_input::transactions_from_reader;
-use tx_engine::model::{ClientId, Clients, InputCsvRecord, TransactionId};
+use tx_engine::model::{ClientId, Clients, InputCsvRecord, OutputMode, TransactionId};
 use tx_engine::spawn_writer_thread;
 
 const NUM_TRANSACTIONS_BENCH: u32 = 1000_000; // We can adjust size for benchmark duration
@@ -148,7 +148,9 @@ fn benchmark_transaction_processing(c: &mut Criterion) {
                     let transcations_result = clients.load_transactions(transactions_iter);
 
                     // write remaining output to sink
-                    clients.write_non_locked();
+                    clients
+                        .send_to_output(OutputMode::SkipLocked)
+                        .expect("failed to write output");
                     let thread_result = thread_handle.join();
 
                     // Use black_box to prevent the compiler optimizing away the result
