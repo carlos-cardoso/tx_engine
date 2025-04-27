@@ -69,7 +69,12 @@ client,available,held,total,locked
  cargo bench
 ```
 
-4. See the Logs (error, info, warn, trace) (errors are used for parsing and external errors, warn for logical errors (like insuficient funds))
+4. See the Logs (error, info, warn, trace)
+   - *error* logs are emitted for parsing issues
+   - *warn* logs for logical/business logic provblems (e.g. like insuficient funds for a transaction)
+   - *info* show the current stage of execution. 
+   - *tracing* level logs trace the execution in detail.
+   - logs are published to stderr to avoid poluting stdout
 
 ```bash
  RUST_LOG=info cargo run --release -- data/input_example.csv > out.csv
